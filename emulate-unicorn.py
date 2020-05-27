@@ -206,11 +206,15 @@ def test_arm():
 
 
 if __name__ == '__main__':
+    # XXX: this is very bad and terrible but hey it works!
     global symbol_map
     symbol_map = {}
     with open('symbol_map.txt','r') as symbol_file:
         for line in symbol_file:
             line = line.strip()
+            # Empty lines or comments get skipped
+            if len(line) == 0 or line[0] == '#':
+                continue
             try:
                 addr, symbol_name = line.split('\t')
                 addr = int(addr, 16) # XXX: should we handle 0x type symbols too?

@@ -1,3 +1,4 @@
+# Functions
 0d402420	read_short_0d8b4000_like_array
 0d4024dc	timer_delay
 0d4014ec	internal_similar_ahbMemFlush
@@ -9,6 +10,8 @@
 0d401488	read_hardware_version
 0d40007c	write_panic_blinker_out
 0d403cd4	busy_loop_for_at_least_x_cycles
+# Data
+# Hardware
 0d800010	TIMER_BASE_REG
 0d800214	HARDWARE_INFO?_REG
 0d8000e0	PANIC_BLINKER?_REG
