@@ -8,6 +8,11 @@ from struct import pack, unpack, unpack_from
 # code to be emulated
 BOOT1_FILENAME = 'boot1-dec.bin'
 
+# TODO: put this in a more sane place
+DUMP_IO = False
+DUMP_FLOW = False
+DUMP_STACK = False
+
 # memory address where emulation starts
 ADDRESS = 0x0D400000
 TIMER_BASE = 0x0d800010
@@ -121,13 +126,13 @@ def hook_mem_invalid(uc, access, address, size, value, user_data):
         except:
             value = 0xBADADD4
         # XXX: Make better
-        if address not in skip_print:
+        if address not in skip_print and DUMP_IO:
             if address not in symbol_map:
                 print('[IO][READ] (%d) %08x: %08x @ PC=%08x' % (size, address, value, pc))
             else:
                 print('[IO][READ] (%d) %s: %08x @ PC=%08x' % (size, symbol_map[address], value, pc))
     elif access == UC_MEM_WRITE:
-        if address not in skip_print:
+        if address not in skip_print and DUMP_IO:
             if address not in symbol_map:
                 print('[IO][WRITE] (%d) %08x: %08x @ PC=%08x' % (size, address, value, pc))
             else:
@@ -206,15 +211,17 @@ def test_arm():
                 mu.emu_start(pc, pc+0x10000, count=30)
         except UcError as e:
             print(e)
-        print('Code Flow:')
-        for i in code_flow:
-            # Todo fix hacky mess that uses tuples and only deals with target not from
-            if i[1] in symbol_map:
-                symbol = symbol_map[i[1]]
-            else:
-                symbol = 'block_{:08x}'.format(i[1])
-            print('{:08x} -> {:08x} : {}'.format(i[0],i[1], symbol))
-        dump_stack(mu)
+        if DUMP_FLOW:
+            print('Code Flow:')
+            for i in code_flow:
+                # Todo fix hacky mess that uses tuples and only deals with target not from
+                if i[1] in symbol_map:
+                    symbol = symbol_map[i[1]]
+                else:
+                    symbol = 'block_{:08x}'.format(i[1])
+                print('{:08x} -> {:08x} : {}'.format(i[0],i[1], symbol))
+        if DUMP_STACK:
+            dump_stack(mu)
         # User code to run after exit for custom runs
         if CUSTOM:
             v1, = unpack('>I', mu.mem_read(some_space,4))
