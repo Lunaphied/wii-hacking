@@ -9,8 +9,9 @@ from struct import pack, unpack, unpack_from
 BOOT1_FILENAME = 'boot1-dec.bin'
 
 # TODO: put this in a more sane place
-DUMP_IO = False
-DUMP_FLOW = False
+DUMP_MAPPINGS = False
+DUMP_IO = True
+DUMP_FLOW = True
 DUMP_STACK = False
 
 # memory address where emulation starts
@@ -43,11 +44,38 @@ skip_print = set([
     TIMER_BASE
 ])
 
+# Attempt to not record some blocks until we return out of them
+# FIXME: do properly
+flow_tracing_bypass = set([
+
+])
+# This is used to keep track of the block we're in until we exit the bypassed block
+bypass_stack = []
+
 # callback for tracing basic blocks
 def hook_block(uc, address, size, user_data):
-    #pass
-    #print(">>> Tracing basic block at 0x%x, blo6ck size = 0x%x" %(address, size))
+    # Sometimes LR might not be used (leaf functions, but this is probably the best we can do for
+    # simple block tracking without post-processing to cleanup or decoding instructions themselves
+    # or matching with IDA/Ghidra output
     from_addr = uc.reg_read(UC_ARM_REG_LR)
+    
+    # XXX: hacky bypass implementation
+    # stack first records the address we were add
+
+    # first handle potentially exiting a level inside the bypass
+    # we have to use the address we just entered because the stack can only store
+    if len(bypass_stack) > 0 and address == bypass_stack[-1]:
+        print('Leaving inner (or outer) bypassed block!')
+        bypass_stack.pop()
+    # now handle potentially entering a new bypass or being within one and entering a non-bypassed
+    # block
+    if address in flow_tracing_bypass or len(flow_tracing_bypass) > 0:
+        print('Entering bypass')
+        # push the bypassed function addr so we can resume tracing when we return
+        bypass_stack.append(address)
+    
+    # We should have nothing on the bypass stack when not within a bypassed block
+
     if len(code_flow) > 0:
         # Don't record infinite loops more than once
         # also use the fact that LR is only updated during function calls (at least for non-leaf)
@@ -98,6 +126,41 @@ def dump_stack(uc, length=100):
 def hook_code(uc, address, size, user_data):
     # dump state after every instruction
     dump_state(uc, "CODE", address)
+
+INFINITE_LOOP_THRESHOLD = 100
+# must be at least 1
+INFINITE_LOOP_HISTORY = 3
+# Whitelist some addresses like delay loops and other known terminating loops
+INFINITE_LOOP_WHITELIST = set([
+    0x0d4024fe
+])
+
+# shouldn't be global and should be a set but don't really know much about python sets yet
+last_loop_history = []
+loop_counter = 0
+# callback to handle (potentially) infinite loops
+def hook_detect_infinite(uc, address, size, user_data):
+    global last_loop_history
+    global loop_counter
+    #print(f'last_loop: {last_loop_addr:08x}, addr: {address:08x}')
+    # This is very hacky and bad
+    if address in INFINITE_LOOP_WHITELIST:
+        # This is probably needed to stop the middle instructions from matching if we
+        # just skipped adding the whitelisted address
+        # FIXME: do this properly
+        last_loop_history = []
+        loop_counter = 0
+    else:
+        if not address in last_loop_history:
+            if len(last_loop_history) == INFINITE_LOOP_HISTORY:
+                last_loop_history = last_loop_history[1:]
+            last_loop_history.append(address)
+            loop_counter = 0
+        else:
+            loop_counter += 1
+        if loop_counter >= INFINITE_LOOP_THRESHOLD:
+            print(f'POTENTIALLY INFINITE LOOP @ {address:08x}')
+            uc.emu_stop()
 
 # Handle special IO reads (like timer/etc)
 def special_case_read(uc, address, size, value):
@@ -162,9 +225,11 @@ def test_arm():
     # map 2MB memory for this emulation
     mu.mem_map(ADDRESS, 0x10000)
     mu.mem_map(0x0d800000, 0x100000, UC_PROT_ALL)
+    
     # Todo learn how this actually should be done and write a damn API doc for both unicorn and the python
     # binding to it, also update local unicorn to github version
     #mu.mem_map_ptr(0x0d000000, 0x100000, UC_PROT_ALL, 0x0d800000)
+    mu.mem_map(0x0d000000, 0x100000, UC_PROT_ALL)
 
     # write machine code to be emulated to memory
     mu.mem_write(ADDRESS, boot1_data)
@@ -187,6 +252,9 @@ def test_arm():
     mu.hook_add(UC_HOOK_MEM_READ|UC_HOOK_MEM_WRITE, hook_mem_invalid, begin=0x0d800000,end=0x0d900000)
     mu.hook_add(UC_HOOK_MEM_INVALID, hook_mem_invalid)
 
+    # register infinite loop detector
+    mu.hook_add(UC_HOOK_CODE, hook_detect_infinite)
+
     # tracing one instruction at ADDRESS with customized callback
     custom_start = 0x0d401488
     custom_end = 0x0d40149a
@@ -206,7 +274,7 @@ def test_arm():
     while True:
         try:
             if not CUSTOM:
-                mu.emu_start(pc, pc+0x10000, count=100000)
+                mu.emu_start(pc, pc+0x10000)
             else:
                 mu.emu_start(pc, pc+0x10000, count=30)
         except UcError as e:
