@@ -1,4 +1,5 @@
 # Functions
+0d400000	boot1_entry
 0d402420	read_short_0d8b4000_like_array
 0d4024dc	timer_delay
 0d4014ec	internal_similar_ahbMemFlush

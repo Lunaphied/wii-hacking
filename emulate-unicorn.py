@@ -65,6 +65,30 @@ def dump_state(uc, dump_context="UNKNOWN", address=0xABADC0DE):
         (dump_context, address, r0, r1, r2, r3, lr))
     print("       PC=0x{:08x} | SP=0x{:08x} | CPSR=0x{:08x}".format(pc, sp, cpsr))
 
+# FIXME: can we do this without needing to provide a length?
+# I'm not sure we can on ARM... at least not embedded arm
+# ... we could if we integrate with the function flow tracing to keep track of the starting and ending frame?
+# maybe? idk think about for real later.
+def dump_stack(uc, length=100):
+    sp = uc.reg_read(UC_ARM_REG_SP)
+    origsp = sp
+    dump = []
+    # assume full descending stack
+    for i in range(length):
+        try:
+            val, = unpack('>I', uc.mem_read(sp, 4))
+            dump.append((sp, val))
+            sp -= 4
+        except:
+            # We assume this only throws when uc.read_mem errors due to memory being invalid which should probably
+            # terminate the stack anyway...
+            break
+    print(f'[STACK] start={origsp:08x}, end={sp:08x}, size={length:08x}')
+    for addr, val in dump:
+        print(f'\t{addr:08x}: {val:08x}')
+    # return probably cleaner for now though dumps are prints onto stdout
+#    return dump
+
 # callback for tracing instructions
 def hook_code(uc, address, size, user_data):
     # dump state after every instruction
@@ -133,6 +157,9 @@ def test_arm():
     # map 2MB memory for this emulation
     mu.mem_map(ADDRESS, 0x10000)
     mu.mem_map(0x0d800000, 0x100000, UC_PROT_ALL)
+    # Todo learn how this actually should be done and write a damn API doc for both unicorn and the python
+    # binding to it, also update local unicorn to github version
+    #mu.mem_map_ptr(0x0d000000, 0x100000, UC_PROT_ALL, 0x0d800000)
 
     # write machine code to be emulated to memory
     mu.mem_write(ADDRESS, boot1_data)
@@ -185,14 +212,15 @@ def test_arm():
             if i[1] in symbol_map:
                 symbol = symbol_map[i[1]]
             else:
-                symbol = 'block_0x{:08x}'.format(i[1])
-            print('0x{:08x} -> 0x{:08x} : {}'.format(i[0],i[1], symbol))
+                symbol = 'block_{:08x}'.format(i[1])
+            print('{:08x} -> {:08x} : {}'.format(i[0],i[1], symbol))
+        dump_stack(mu)
         # User code to run after exit for custom runs
         if CUSTOM:
             v1, = unpack('>I', mu.mem_read(some_space,4))
             v2, = unpack('>I', mu.mem_read(some_space+4,4))
-            print('v1: 0x%08x' % (v1))
-            print('v2: 0x%08x' % (v2))
+            print('v1: %08x' % (v1))
+            print('v2: %08x' % (v2))
         # XXX: for running multiple loops (was a plan for handling buggy invalid read detection)
         break
         pc = mu.reg_read(UC_ARM_REG_PC)
@@ -215,9 +243,11 @@ if __name__ == '__main__':
             if len(line) == 0 or line[0] == '#':
                 continue
             try:
-                addr, symbol_name = line.split('\t')
+                parts = filter(lambda x: len(x)>0, line.split())
+                addr, symbol_name = parts
                 addr = int(addr, 16) # XXX: should we handle 0x type symbols too?
                 symbol_map[addr] = symbol_name
+                print(f'Adding mapping {symbol_name}@{addr:08x}')
             except Exception as e:
                 print(f'Badly formatted line: {line!r}, error={e}')
     test_arm()
